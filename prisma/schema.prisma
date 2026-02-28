@@ -1,0 +1,1037 @@
+// UAE Books - Comprehensive Accounting SaaS Database Schema
+// All monetary amounts stored as integers (fils/cents)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./db/custom.db"
+}
+
+// ============================================
+// CORE TABLES
+// ============================================
+
+model Company {
+  id              String   @id @default(cuid())
+  name            String
+  nameAr          String?  // Arabic name
+  logo            String?  // URL to logo
+  address         String?
+  addressAr       String?
+  city            String?
+  emirate         String?  // UAE Emirate
+  trn             String?  // Tax Registration Number (15 digits)
+  tradeLicense    String?
+  industry        String   // healthcare, retail, trading, construction, real_estate, hospitality, professional_services, manufacturing, general
+  fiscalYearStart Int      @default(1) // Month number (1-12)
+  vatRegistered   Boolean  @default(true)
+  vatNumber       String?
+  defaultVatRate  Int      @default(500) // 5% = 500 basis points
+  currency        String   @default("AED")
+  phone           String?
+  email           String?
+  website         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           UserCompany[]
+  accounts        Account[]
+  contacts        Contact[]
+  invoices        Invoice[]
+  creditNotes     CreditNote[]
+  quotes          Quote[]
+  bills           Bill[]
+  purchaseOrders  PurchaseOrder[]
+  payments        Payment[]
+  expenses        Expense[]
+  journalEntries  JournalEntry[]
+  bankAccounts    BankAccount[]
+  products        Product[]
+  warehouses      Warehouse[]
+  employees       Employee[]
+  payrollRuns     PayrollRun[]
+  vatReturns      VatReturn[]
+  ctReturns       CtReturn[]
+  settings        Settings?
+  recurringTemplates RecurringTemplate[]
+  projects        Project[]
+  fixedAssets     FixedAsset[]
+  documents       Document[]
+  auditLogs       AuditLog[]
+
+  @@map("companies")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?
+  name          String?
+  avatar        String?
+  role          String   @default("owner") // owner, admin, accountant, staff, viewer
+  emailVerified DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  companies     UserCompany[]
+  auditLogs     AuditLog[]
+  expenseClaims ExpenseClaim[]
+
+  @@map("users")
+}
+
+model UserCompany {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  role      String   @default("staff") // owner, admin, accountant, staff, viewer
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@map("user_companies")
+}
+
+// ============================================
+// CHART OF ACCOUNTS
+// ============================================
+
+model Account {
+  id           String   @id @default(cuid())
+  companyId    String
+  code         String   // Account code (e.g., 1000, 2000)
+  name         String
+  nameAr       String?  // Arabic name
+  type         String   // asset, liability, equity, revenue, expense
+  subType      String?  // current_asset, fixed_asset, current_liability, etc.
+  parentId     String?
+  description  String?
+  vatApplicable Boolean @default(false)
+  vatRate      Int?     // VAT rate in basis points
+  balance      Int      @default(0) // Current balance in fils
+  openingBalance Int    @default(0)
+  isActive     Boolean  @default(true)
+  isSystem     Boolean  @default(false) // System accounts cannot be deleted
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent       Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children     Account[] @relation("AccountHierarchy")
+  journalLines JournalLine[]
+  invoiceItems InvoiceItem[]
+  billItems    BillItem[]
+  expenses     Expense[]
+  bankTransactions BankTransaction[]
+
+  @@unique([companyId, code])
+  @@map("accounts")
+}
+
+// ============================================
+// CONTACTS (Customers & Suppliers)
+// ============================================
+
+model Contact {
+  id            String   @id @default(cuid())
+  companyId     String
+  name          String
+  nameAr        String?
+  type          String   @default("customer") // customer, supplier, both
+  trn           String?  // Tax Registration Number
+  email         String?
+  phone         String?
+  mobile        String?
+  address       String?
+  addressAr     String?
+  city          String?
+  emirate       String?
+  country       String   @default("UAE")
+  paymentTerms  Int      @default(30) // Net days
+  creditLimit   Int?     // In fils
+  currency      String   @default("AED")
+  notes         String?
+  isActive      Boolean  @default(true)
+  balance       Int      @default(0) // Outstanding balance in fils
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices      Invoice[]
+  creditNotes   CreditNote[]
+  quotes        Quote[]
+  bills         Bill[]
+  purchaseOrders PurchaseOrder[]
+  expenses      Expense[]
+
+  @@map("contacts")
+}
+
+// ============================================
+// INVOICING
+// ============================================
+
+model Invoice {
+  id              String   @id @default(cuid())
+  companyId       String
+  contactId       String
+  number          String   // Invoice number
+  reference       String?  // Customer reference
+  date            DateTime
+  dueDate         DateTime
+  status          String   @default("draft") // draft, sent, viewed, partial, paid, overdue, cancelled
+  currency        String   @default("AED")
+  subtotal        Int      @default(0) // In fils
+  discountTotal   Int      @default(0)
+  vatTotal        Int      @default(0)
+  grandTotal      Int      @default(0)
+  amountPaid      Int      @default(0)
+  notes           String?
+  terms           String?
+  qrCode          String?  // Base64 encoded QR data
+  sentAt          DateTime?
+  viewedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact         Contact  @relation(fields: [contactId], references: [id])
+  items           InvoiceItem[]
+  payments        Payment[]
+  creditNotes     CreditNote[]
+
+  @@unique([companyId, number])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  productId   String?
+  accountId   String
+  description String
+  qty         Int      @default(1)
+  unitPrice   Int      @default(0) // In fils
+  discount    Int      @default(0) // Discount amount in fils
+  vatRate     Int      @default(500) // 5% = 500 basis points
+  vatAmount   Int      @default(0)
+  total       Int      @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  account     Account  @relation(fields: [accountId], references: [id])
+
+  @@map("invoice_items")
+}
+
+// ============================================
+// CREDIT NOTES
+// ============================================
+
+model CreditNote {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String
+  invoiceId     String?  // Linked to original invoice
+  number        String
+  date          DateTime
+  reason        String?
+  currency      String   @default("AED")
+  subtotal      Int      @default(0)
+  discountTotal Int      @default(0)
+  vatTotal      Int      @default(0)
+  grandTotal    Int      @default(0)
+  status        String   @default("draft") // draft, applied, cancelled
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact  @relation(fields: [contactId], references: [id])
+  invoice       Invoice? @relation(fields: [invoiceId], references: [id])
+  items         CreditNoteItem[]
+
+  @@unique([companyId, number])
+  @@map("credit_notes")
+}
+
+model CreditNoteItem {
+  id            String   @id @default(cuid())
+  creditNoteId  String
+  description   String
+  accountId     String
+  qty           Int      @default(1)
+  unitPrice     Int      @default(0)
+  discount      Int      @default(0)
+  vatRate       Int      @default(500)
+  vatAmount     Int      @default(0)
+  total         Int      @default(0)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  creditNote    CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+
+  @@map("credit_note_items")
+}
+
+// ============================================
+// QUOTES / ESTIMATES
+// ============================================
+
+model Quote {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String
+  number        String
+  date          DateTime
+  expiryDate    DateTime?
+  status        String   @default("draft") // draft, sent, accepted, declined, expired, converted
+  currency      String   @default("AED")
+  subtotal      Int      @default(0)
+  discountTotal Int      @default(0)
+  vatTotal      Int      @default(0)
+  grandTotal    Int      @default(0)
+  notes         String?
+  terms         String?
+  convertedInvoiceId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact  @relation(fields: [contactId], references: [id])
+  items         QuoteItem[]
+
+  @@unique([companyId, number])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          String   @id @default(cuid())
+  quoteId     String
+  productId   String?
+  description String
+  accountId   String
+  qty         Int      @default(1)
+  unitPrice   Int      @default(0)
+  discount    Int      @default(0)
+  vatRate     Int      @default(500)
+  vatAmount   Int      @default(0)
+  total       Int      @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@map("quote_items")
+}
+
+// ============================================
+// PURCHASES & BILLS
+// ============================================
+
+model Bill {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String
+  number        String   // Our bill number
+  supplierRef   String?  // Supplier's invoice number
+  date          DateTime
+  dueDate       DateTime
+  status        String   @default("draft") // draft, awaiting_approval, approved, partial, paid, overdue, cancelled
+  currency      String   @default("AED")
+  subtotal      Int      @default(0)
+  discountTotal Int      @default(0)
+  vatTotal      Int      @default(0)
+  grandTotal    Int      @default(0)
+  amountPaid    Int      @default(0)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact  @relation(fields: [contactId], references: [id])
+  items         BillItem[]
+  payments      Payment[]
+
+  @@unique([companyId, number])
+  @@map("bills")
+}
+
+model BillItem {
+  id          String   @id @default(cuid())
+  billId      String
+  productId   String?
+  accountId   String
+  description String
+  qty         Int      @default(1)
+  unitPrice   Int      @default(0)
+  discount    Int      @default(0)
+  vatRate     Int      @default(500)
+  vatAmount   Int      @default(0)
+  total       Int      @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  bill        Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  account     Account  @relation(fields: [accountId], references: [id])
+
+  @@map("bill_items")
+}
+
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String
+  number        String
+  date          DateTime
+  expectedDate  DateTime?
+  status        String   @default("draft") // draft, issued, partially_received, received, cancelled
+  currency      String   @default("AED")
+  subtotal      Int      @default(0)
+  vatTotal      Int      @default(0)
+  grandTotal    Int      @default(0)
+  notes         String?
+  billId        String?  // Converted to bill
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact  @relation(fields: [contactId], references: [id])
+  items         PurchaseOrderItem[]
+
+  @@unique([companyId, number])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String   @id @default(cuid())
+  purchaseOrderId String
+  productId       String?
+  description     String
+  qty             Int      @default(1)
+  qtyReceived     Int      @default(0)
+  unitPrice       Int      @default(0)
+  vatRate         Int      @default(500)
+  vatAmount       Int      @default(0)
+  total           Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_order_items")
+}
+
+// ============================================
+// PAYMENTS
+// ============================================
+
+model Payment {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String?
+  invoiceId     String?
+  billId        String?
+  bankAccountId String?
+  number        String   // Payment reference
+  date          DateTime
+  amount        Int      // In fils
+  method        String   // bank_transfer, cash, cheque, card
+  reference     String?  // Cheque number, transaction ref
+  notes         String?
+  status        String   @default("completed") // pending, completed, cancelled, bounced
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice       Invoice? @relation(fields: [invoiceId], references: [id])
+  bill          Bill?    @relation(fields: [billId], references: [id])
+
+  @@map("payments")
+}
+
+// ============================================
+// JOURNAL ENTRIES (Double-Entry Accounting)
+// ============================================
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  companyId   String
+  entryNumber String
+  date        DateTime
+  description String?
+  reference   String?
+  source      String?  // invoice, bill, payment, manual, etc.
+  sourceId    String?  // ID of source document
+  status      String   @default("draft") // draft, posted, reversed
+  totalDebit  Int      @default(0)
+  totalCredit Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines       JournalLine[]
+
+  @@unique([companyId, entryNumber])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id             String   @id @default(cuid())
+  journalEntryId String
+  accountId      String
+  debit          Int      @default(0) // In fils
+  credit         Int      @default(0)
+  description    String?
+  createdAt      DateTime @default(now())
+
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        Account  @relation(fields: [accountId], references: [id])
+
+  @@map("journal_lines")
+}
+
+// ============================================
+// BANKING
+// ============================================
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  companyId     String
+  bankName      String
+  accountName   String
+  accountNumber String
+  iban          String
+  currency      String   @default("AED")
+  balance       Int      @default(0) // Current balance in fils
+  openingBalance Int     @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  transactions  BankTransaction[]
+
+  @@map("bank_accounts")
+}
+
+model BankTransaction {
+  id              String   @id @default(cuid())
+  bankAccountId   String
+  date            DateTime
+  description     String
+  amount          Int      // Positive for credit, negative for debit
+  balance         Int      // Running balance after transaction
+  type            String   // deposit, withdrawal, transfer_in, transfer_out
+  categoryId      String?  // Account ID for categorization
+  reference       String?
+  reconciled      Boolean  @default(false)
+  reconciledAt    DateTime?
+  reconciliationId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bankAccount     BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  category        Account? @relation(fields: [categoryId], references: [id])
+
+  @@map("bank_transactions")
+}
+
+model Reconciliation {
+  id              String   @id @default(cuid())
+  companyId       String
+  bankAccountId   String
+  startDate       DateTime
+  endDate         DateTime
+  openingBalance  Int
+  closingBalance  Int
+  statementBalance Int
+  difference      Int
+  status          String   @default("in_progress") // in_progress, completed
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("reconciliations")
+}
+
+// ============================================
+// EXPENSES
+// ============================================
+
+model Expense {
+  id            String   @id @default(cuid())
+  companyId     String
+  contactId     String?
+  accountId     String
+  bankAccountId String?
+  number        String
+  date          DateTime
+  amount        Int      // In fils
+  vatAmount     Int      @default(0)
+  vatRate       Int      @default(500)
+  description   String
+  category      String?
+  paymentMethod String   // bank_transfer, cash, card, cheque
+  reference     String?
+  receiptUrl    String?
+  isRecurring   Boolean  @default(false)
+  recurringId   String?
+  status        String   @default("approved") // pending, approved, rejected
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact? @relation(fields: [contactId], references: [id])
+  account       Account  @relation(fields: [accountId], references: [id])
+
+  @@unique([companyId, number])
+  @@map("expenses")
+}
+
+model ExpenseClaim {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String
+  number      String
+  date        DateTime
+  amount      Int
+  description String?
+  status      String   @default("pending") // pending, approved, rejected, paid
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id])
+  items       ExpenseClaimItem[]
+
+  @@map("expense_claims")
+}
+
+model ExpenseClaimItem {
+  id             String   @id @default(cuid())
+  expenseClaimId String
+  date           DateTime
+  description    String
+  amount         Int
+  receiptUrl     String?
+  createdAt      DateTime @default(now())
+
+  expenseClaim   ExpenseClaim @relation(fields: [expenseClaimId], references: [id], onDelete: Cascade)
+
+  @@map("expense_claim_items")
+}
+
+// ============================================
+// PRODUCTS / INVENTORY
+// ============================================
+
+model Product {
+  id            String   @id @default(cuid())
+  companyId     String
+  sku           String
+  name          String
+  nameAr        String?
+  description   String?
+  type          String   @default("product") // product, service
+  category      String?
+  costPrice     Int      @default(0) // In fils
+  sellingPrice  Int      @default(0)
+  vatRate       Int      @default(500)
+  unit          String   @default("pcs")
+  barcode       String?
+  stockOnHand   Int      @default(0)
+  reorderLevel  Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoiceItems  InvoiceItem[]
+  billItems     BillItem[]
+  movements     InventoryMovement[]
+  batches       Batch[]
+
+  @@unique([companyId, sku])
+  @@map("products")
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  nameAr      String?
+  address     String?
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements   InventoryMovement[]
+
+  @@map("warehouses")
+}
+
+model InventoryMovement {
+  id           String   @id @default(cuid())
+  companyId    String
+  productId    String
+  warehouseId  String
+  type         String   // in, out, transfer, adjustment
+  qty          Int
+  reference    String?
+  referenceId  String?
+  reason       String?
+  batchId      String?
+  unitCost     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  batch        Batch?   @relation(fields: [batchId], references: [id])
+
+  @@map("inventory_movements")
+}
+
+model Batch {
+  id              String   @id @default(cuid())
+  companyId       String
+  productId       String
+  batchNumber     String
+  manufacturingDate DateTime?
+  expiryDate      DateTime?
+  qty             Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  movements       InventoryMovement[]
+
+  @@map("batches")
+}
+
+// ============================================
+// PAYROLL & WPS
+// ============================================
+
+model Employee {
+  id                String   @id @default(cuid())
+  companyId         String
+  employeeId        String   // Company employee ID
+  fullName          String
+  fullNameAr        String?
+  nationality       String
+  emiratesId        String?  // 14-digit Emirates ID
+  passportNo        String?
+  passportExpiry    DateTime?
+  labourCardNo      String?
+  mohreId           String?
+  skillLevel        Int?     // 1-5
+  joiningDate       DateTime
+  terminationDate   DateTime?
+  department        String?
+  designation       String?
+  basicSalary       Int      // In fils
+  housingAllowance  Int      @default(0)
+  transportAllowance Int     @default(0)
+  otherAllowances   Int      @default(0)
+  bankName          String?
+  iban              String?
+  bankRoutingCode   String?  // 9-digit
+  annualLeaveBalance Int     @default(30)
+  sickLeaveBalance  Int      @default(90)
+  status            String   @default("active") // active, on_leave, terminated
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollItems      PayrollItem[]
+
+  @@unique([companyId, employeeId])
+  @@map("employees")
+}
+
+model PayrollRun {
+  id          String   @id @default(cuid())
+  companyId   String
+  month       Int
+  year        Int
+  status      String   @default("draft") // draft, approved, processed
+  totalAmount Int      @default(0)
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items       PayrollItem[]
+
+  @@unique([companyId, month, year])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id              String   @id @default(cuid())
+  payrollRunId    String
+  employeeId      String
+  basicSalary     Int
+  housingAllowance Int
+  transportAllowance Int
+  otherAllowances Int
+  overtimeHours   Int      @default(0)
+  overtimeAmount  Int      @default(0)
+  leaveSalary     Int      @default(0)
+  deductions      Int      @default(0)
+  netSalary       Int
+  daysPaid        Int      @default(30)
+  createdAt       DateTime @default(now())
+
+  payrollRun      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee        Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("payroll_items")
+}
+
+model GratuityAccrual {
+  id          String   @id @default(cuid())
+  companyId   String
+  employeeId  String
+  month       Int
+  year        Int
+  amount      Int
+  createdAt   DateTime @default(now())
+
+  @@map("gratuity_accruals")
+}
+
+// ============================================
+// UAE VAT MODULE
+// ============================================
+
+model VatReturn {
+  id              String   @id @default(cuid())
+  companyId       String
+  periodStart     DateTime
+  periodEnd       DateTime
+  status          String   @default("draft") // draft, filed, paid
+  box1a           Int      @default(0) // Standard rated supplies - Abu Dhabi
+  box1b           Int      @default(0) // Dubai
+  box1c           Int      @default(0) // Sharjah
+  box1d           Int      @default(0) // Ajman
+  box1e           Int      @default(0) // Umm Al Quwain
+  box1f           Int      @default(0) // Ras Al Khaimah
+  box1g           Int      @default(0) // Fujairah
+  box2            Int      @default(0) // Tax refunds to tourists
+  box3            Int      @default(0) // Supplies subject to reverse charge
+  box4            Int      @default(0) // Zero-rated supplies
+  box5            Int      @default(0) // Exempt supplies
+  box6            Int      @default(0) // Standard rated expenses
+  box7            Int      @default(0) // Reverse charge expenses
+  box8            Int      @default(0) // Input tax adjustments
+  box9            Int      @default(0) // Net VAT due
+  filedAt         DateTime?
+  filingReference String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("vat_returns")
+}
+
+// ============================================
+// UAE CORPORATE TAX MODULE
+// ============================================
+
+model CtReturn {
+  id                  String   @id @default(cuid())
+  companyId           String
+  yearStart           DateTime
+  yearEnd             DateTime
+  status              String   @default("draft")
+  accountingProfit    Int      @default(0)
+  nonDeductibleExpenses Int    @default(0)
+  exemptIncome        Int      @default(0)
+  taxableIncome       Int      @default(0)
+  thresholdExemption  Int      @default(375000000) // AED 375,000 in fils
+  smallBusinessRelief Boolean  @default(false)
+  taxRate             Int      @default(900) // 9% = 900 basis points
+  taxLiability        Int      @default(0)
+  filedAt             DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("ct_returns")
+}
+
+// ============================================
+// RECURRING TEMPLATES
+// ============================================
+
+model RecurringTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  type        String   // invoice, bill, expense
+  name        String
+  frequency    String   // weekly, monthly, quarterly, yearly
+  startDate    DateTime
+  endDate      DateTime?
+  nextRunDate  DateTime?
+  lastRunDate  DateTime?
+  isActive     Boolean  @default(true)
+  autoSend     Boolean  @default(false)
+  templateData String   // JSON of template
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("recurring_templates")
+}
+
+// ============================================
+// PROJECTS
+// ============================================
+
+model Project {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  code        String?
+  customerId   String?
+  startDate   DateTime?
+  endDate     DateTime?
+  status      String   @default("active") // active, completed, on_hold, cancelled
+  budget      Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tasks       ProjectTask[]
+
+  @@map("projects")
+}
+
+model ProjectTask {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String?
+  status      String   @default("pending") // pending, in_progress, completed
+  dueDate     DateTime?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_tasks")
+}
+
+// ============================================
+// FIXED ASSETS
+// ============================================
+
+model FixedAsset {
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String
+  assetNumber     String
+  category        String?
+  purchaseDate    DateTime
+  purchasePrice   Int
+  salvageValue    Int      @default(0)
+  usefulLife      Int      // In months
+  depreciationMethod String @default("straight_line")
+  accumulatedDepreciation Int @default(0)
+  netBookValue    Int
+  location        String?
+  status          String   @default("active") // active, disposed, sold
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("fixed_assets")
+}
+
+// ============================================
+// DOCUMENTS & AUDIT
+// ============================================
+
+model Document {
+  id          String   @id @default(cuid())
+  companyId   String
+  type        String   // invoice, bill, receipt, contract, other
+  name        String
+  url         String
+  size        Int?
+  mimeType    String?
+  relatedType String?  // invoice, bill, expense, etc.
+  relatedId   String?
+  createdAt   DateTime @default(now())
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String?
+  action      String   // create, update, delete, view
+  entity      String   // invoice, bill, contact, etc.
+  entityId    String?
+  oldValues   String?  // JSON
+  newValues   String?  // JSON
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ============================================
+// SETTINGS
+// ============================================
+
+model Settings {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  invoicePrefix         String   @default("INV-")
+  invoiceNextNumber     Int      @default(1)
+  creditNotePrefix      String   @default("CN-")
+  creditNoteNextNumber  Int      @default(1)
+  quotePrefix           String   @default("QT-")
+  quoteNextNumber       Int      @default(1)
+  billPrefix            String   @default("BILL-")
+  billNextNumber        Int      @default(1)
+  paymentPrefix         String   @default("PAY-")
+  paymentNextNumber     Int      @default(1)
+  expensePrefix         String   @default("EXP-")
+  expenseNextNumber     Int      @default(1)
+  defaultPaymentTerms   Int      @default(30)
+  defaultInvoiceNotes   String?
+  defaultInvoiceTerms   String?
+  defaultVatRate        Int      @default(500)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
