@@ -1,3 +1,5 @@
+'use server'
+
 // ============================================
 // UAE Books - Database Query Helpers
 // Reusable functions for common database operations

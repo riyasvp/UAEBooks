@@ -1,5 +1,7 @@
 'use server'
 
+import 'server-only'
+
 import { createClient } from '@/lib/supabase/server'
 import type { Company } from '@/types/database'
 
@@ -35,6 +37,10 @@ export async function getUserCompanies(): Promise<(Company & { role: string })[]
 export async function getActiveCompanyId(): Promise<string | null> {
   const companies = await getUserCompanies()
   return companies[0]?.id || null
+}
+
+export async function getCompany(id: string): Promise<Company | null> {
+  return getCompanyById(id)
 }
 
 export async function getCompanyById(id: string): Promise<Company | null> {
