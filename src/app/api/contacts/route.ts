@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { DEMO_COMPANY, DEMO_CONTACTS } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
 import { getActiveCompanyId } from '@/lib/auth/company'
 import { getContacts } from '@/lib/db/queries'
 
 export async function GET(request: NextRequest) {
   try {
+    // Check for demo mode
+    const demoMode = request.headers.get('x-demo-mode') === 'true' || 
+                     request.cookies.get('uae-books-demo-mode')?.value === 'true'
+    
+    if (demoMode) {
+      return NextResponse.json({ 
+        contacts: DEMO_CONTACTS,
+        company: DEMO_COMPANY
+      })
+    }
+    
     const supabase = await createClient()
     
     // Check auth
@@ -19,14 +31,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No company found' }, { status: 404 })
     }
     
-    // Get type filter from query params
-    const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type') as 'customer' | 'supplier' | null
-    
     // Get contacts
-    const contacts = await getContacts(companyId, type || undefined)
+    const contacts = await getContacts(companyId)
     
-    return NextResponse.json({ contacts })
+    return NextResponse.json({ contacts, company: null })
   } catch (error) {
     console.error('Error fetching contacts:', error)
     return NextResponse.json(

@@ -1,89 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { DEMO_BANK_ACCOUNTS, DEMO_COMPANY } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
+import { getActiveCompanyId } from '@/lib/auth/company'
+import { getBankAccounts } from '@/lib/db/queries'
 
-// GET - List bank accounts
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    // Check for demo mode
+    const demoMode = request.headers.get('x-demo-mode') === 'true' || 
+                     request.cookies.get('uae-books-demo-mode')?.value === 'true'
     
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    
-    // Get user's companies
-    const { data: userCompanies } = await supabase
-      .from('users_companies')
-      .select('company_id')
-      .eq('user_id', user.id)
-    
-    const companyIds = userCompanies?.map(uc => uc.company_id) || []
-    
-    const { data, error } = await supabase
-      .from('bank_accounts')
-      .select('*')
-      .in('company_id', companyIds)
-      .eq('is_active', true)
-    
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-    
-    return NextResponse.json(data)
-  } catch (error) {
-    console.error('Banking API error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
-}
-
-// POST - Create bank account
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient()
-    
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    
-    const body = await request.json()
-    const { company_id, bank_name, account_name, account_number, iban, currency, opening_balance } = body
-    
-    // Verify user has access to this company
-    const { data: userCompany } = await supabase
-      .from('users_companies')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('company_id', company_id)
-      .single()
-    
-    if (!userCompany) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-    }
-    
-    const { data, error } = await supabase
-      .from('bank_accounts')
-      .insert({
-        company_id,
-        bank_name,
-        account_name,
-        account_number,
-        iban: iban || null,
-        currency: currency || 'AED',
-        opening_balance: opening_balance || 0,
-        current_balance: opening_balance || 0,
-        is_active: true,
+    if (demoMode) {
+      return NextResponse.json({ 
+        bankAccounts: DEMO_BANK_ACCOUNTS,
+        company: DEMO_COMPANY
       })
-      .select()
-      .single()
-    
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
     }
     
-    return NextResponse.json(data)
+    const supabase = await createClient()
+    
+    // Check auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    
+    // Get company ID
+    const companyId = await getActiveCompanyId()
+    if (!companyId) {
+      return NextResponse.json({ error: 'No company found' }, { status: 404 })
+    }
+    
+    // Get bank accounts
+    const bankAccounts = await getBankAccounts(companyId)
+    
+    return NextResponse.json({ bankAccounts, company: null })
   } catch (error) {
-    console.error('Create bank account error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('Error fetching banking:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch banking data' },
+      { status: 500 }
+    )
   }
 }

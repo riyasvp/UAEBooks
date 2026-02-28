@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { DEMO_COMPANY, DEMO_ACCOUNTS } from '@/lib/demo-data'
+import { DEMO_EMPLOYEES, DEMO_PAYROLL_RUNS } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
 import { getActiveCompanyId } from '@/lib/auth/company'
-import { getAccounts } from '@/lib/db/queries'
+import { getEmployees, getPayrollRuns } from '@/lib/db/queries'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
     
     if (demoMode) {
       return NextResponse.json({ 
-        accounts: DEMO_ACCOUNTS,
-        company: DEMO_COMPANY
+        employees: DEMO_EMPLOYEES,
+        payrollRuns: DEMO_PAYROLL_RUNS
       })
     }
     
@@ -31,15 +31,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No company found' }, { status: 404 })
     }
     
-    // Get accounts
-    const accounts = await getAccounts(companyId)
+    // Get employees and payroll runs
+    const [employees, payrollRuns] = await Promise.all([
+      getAllEmployees(companyId),
+      getPayrollRuns(companyId)
+    ])
     
-    return NextResponse.json({ accounts, company: null })
+    return NextResponse.json({ employees, payrollRuns })
   } catch (error) {
-    console.error('Error fetching accounts:', error)
+    console.error('Error fetching payroll:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch accounts' },
+      { error: 'Failed to fetch payroll data' },
       { status: 500 }
     )
   }
+}
+
+async function getAllEmployees(companyId: string) {
+  const { getEmployees } = await import('@/lib/db/queries')
+  return getEmployees(companyId)
 }

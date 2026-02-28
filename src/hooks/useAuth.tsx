@@ -42,6 +42,7 @@ interface AuthContextType {
   isLoading: boolean
   isAuthenticated: boolean
   isDemoMode: boolean
+  isConfigured: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -114,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated,
         isDemoMode,
+        isConfigured: false, // Demo mode - Supabase not configured
       }}
     >
       {children}

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { DEMO_COMPANY, DEMO_ACCOUNTS } from '@/lib/demo-data'
+import { DEMO_INVOICES, DEMO_CONTACTS } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
 import { getActiveCompanyId } from '@/lib/auth/company'
-import { getAccounts } from '@/lib/db/queries'
+import { getInvoices, getContacts } from '@/lib/db/queries'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
     
     if (demoMode) {
       return NextResponse.json({ 
-        accounts: DEMO_ACCOUNTS,
-        company: DEMO_COMPANY
+        invoices: DEMO_INVOICES,
+        contacts: DEMO_CONTACTS.filter(c => c.type === 'customer' || c.type === 'both')
       })
     }
     
@@ -31,14 +31,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No company found' }, { status: 404 })
     }
     
-    // Get accounts
-    const accounts = await getAccounts(companyId)
+    // Get invoices and contacts
+    const [invoices, contacts] = await Promise.all([
+      getInvoices(companyId),
+      getContacts(companyId, 'customer')
+    ])
     
-    return NextResponse.json({ accounts, company: null })
+    return NextResponse.json({ invoices, contacts })
   } catch (error) {
-    console.error('Error fetching accounts:', error)
+    console.error('Error fetching invoices:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch accounts' },
+      { error: 'Failed to fetch invoices' },
       { status: 500 }
     )
   }
